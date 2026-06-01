@@ -53,6 +53,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [started, setStarted] = useState(false);
+  const [error, setError] = useState(null);
   const bottomRef = useRef(null);
   const textareaRef = useRef(null);
 
@@ -61,10 +62,16 @@ export default function App() {
   }, [messages, loading]);
 
   const sendMessage = async (text) => {
-    const userText = text || input.trim();
+    const userText = (text || input).trim();
     if (!userText || loading) return;
     setInput("");
     setStarted(true);
+    setError(null);
+
+    // Reset textarea height
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
 
     const newMessages = [...messages, { role: "user", content: userText }];
     setMessages(newMessages);
@@ -73,7 +80,10 @@ export default function App() {
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
@@ -81,17 +91,33 @@ export default function App() {
           messages: newMessages,
         }),
       });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error?.message || `API error ${res.status}`);
+      }
+
       const data = await res.json();
       const reply = data.content?.map(b => b.text || "").join("") || "Something went wrong. Try again.";
       setMessages([...newMessages, { role: "assistant", content: reply }]);
-    } catch {
-      setMessages([...newMessages, { role: "assistant", content: "Connection issue. Please try again." }]);
+    } catch (err) {
+      const msg = err.message?.includes("fetch")
+        ? "Can't reach the server. Make sure you're logged into Claude.ai in this browser, then try again."
+        : err.message || "Connection issue. Please try again.";
+      setError(msg);
+      setMessages([...newMessages, { role: "assistant", content: "⚠️ " + msg }]);
     }
     setLoading(false);
   };
 
   const handleKey = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (input.trim() && !loading) {
+        sendMessage();
+      }
+    }
   };
 
   return (
@@ -108,7 +134,6 @@ export default function App() {
         ::-webkit-scrollbar-thumb { background: #3d3020; border-radius: 2px; }
         @keyframes bounce { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-6px)} }
         @keyframes fadeUp { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes shimmer { 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
         .msg-bubble { animation: fadeUp 0.3s ease forwards; }
         .topic-btn:hover { background: #2a2010 !important; border-color: #c9a96e !important; transform: translateY(-2px); }
         .topic-btn { transition: all 0.2s ease; }
@@ -151,10 +176,7 @@ export default function App() {
       </div>
 
       {/* Divider */}
-      <div style={{
-        width: "100%", maxWidth: 720, padding: "0 24px",
-        marginTop: 20, marginBottom: 0,
-      }}>
+      <div style={{ width: "100%", maxWidth: 720, padding: "0 24px", marginTop: 20 }}>
         <div style={{ height: 1, background: "linear-gradient(90deg, transparent, #3d3020, transparent)" }} />
       </div>
 
@@ -275,6 +297,16 @@ export default function App() {
         padding: "20px 24px 28px", position: "sticky", bottom: 0,
         background: "linear-gradient(to top, #0d0b08 80%, transparent)",
       }}>
+        {error && (
+          <div style={{
+            marginBottom: 10, padding: "10px 14px",
+            background: "#1a0f0f", border: "1px solid #5a2020",
+            borderRadius: 10, color: "#c87070",
+            fontFamily: "'Source Sans 3', sans-serif", fontSize: 13,
+          }}>
+            ⚠️ {error} — Make sure you're logged into <strong>claude.ai</strong> in this browser first.
+          </div>
+        )}
         <div style={{
           display: "flex", gap: 10, alignItems: "flex-end",
           background: "#130f0a", border: "1px solid #2d2318",
@@ -298,13 +330,16 @@ export default function App() {
               e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
             }}
           />
-          <button className="send-btn" onClick={() => sendMessage()} disabled={!input.trim() || loading}
+          <button
+            className="send-btn"
+            onClick={() => sendMessage()}
+            disabled={!input.trim() || loading}
             style={{
               width: 42, height: 42, borderRadius: 12, flexShrink: 0,
               background: input.trim() && !loading ? "#c9a96e" : "#2d2318",
               border: "none", cursor: input.trim() && !loading ? "pointer" : "default",
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 18, transition: "background 0.2s",
+              fontSize: 18,
             }}>
             ↑
           </button>
